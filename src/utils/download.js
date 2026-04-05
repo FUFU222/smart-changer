@@ -1,19 +1,17 @@
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
-// バイナリデータをBlob化
-const convertToBlob = (image) => {
-  return new Blob([image], { type: 'image/jpeg' });
+const getZipEntryName = (image, format) => {
+  return image.name || `converted-image.${format}`;
 };
 
 // Zipファイルに変換しダウンロード
-const downloadAsZip = async (images, fileName) => {
+const downloadAsZip = async (images, fileName, format) => {
   try {
     const sanitizedFileName = fileName.trim() ? fileName : 'converted_images';
     const zip = new JSZip();
     for (const image of images) {
-      const blob = convertToBlob(image);
-      zip.file(`${image.name}.jpg`, blob);
+      zip.file(getZipEntryName(image, format), image);
     }
     const content = await zip.generateAsync({ type: 'blob' });
     saveAs(content, `${sanitizedFileName}.zip`);
@@ -23,4 +21,4 @@ const downloadAsZip = async (images, fileName) => {
 };
 
 
-export { downloadAsZip };
+export { downloadAsZip, getZipEntryName };
