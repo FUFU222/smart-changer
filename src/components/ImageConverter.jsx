@@ -49,6 +49,10 @@ const ImageConverter = () => {
   const [items, setItemsState] = useState([]);
   const [results, setResults] = useState([]);
   const [progress, setProgress] = useState(null);
+  // 画像ごとの変換状態（id → 'converting' | 'done' | 'failed'）
+  const [itemStatus, setItemStatus] = useState({});
+  // ダウンロード済みの変換結果の id
+  const [savedIds, setSavedIds] = useState(() => new Set());
   const [inputNotice, setInputNotice] = useState(null);
   const [resultNotice, setResultNotice] = useState(null);
   const [downloadMode, setDownloadMode] = useDownloadMode();
@@ -59,6 +63,7 @@ const ImageConverter = () => {
   const convertButtonRef = useRef(null);
   const focusResultsRef = useRef(false);
   const abortedRef = useRef(false);
+  const resultsVersionRef = useRef(0);
   // 続けてドロップされたとき、描画前の古い一覧に上書きしないよう最新の一覧を保持する
   const itemsRef = useRef(items);
 
@@ -89,8 +94,22 @@ const ImageConverter = () => {
 
   // 設定や画像が変わったら、古い変換結果は捨てる
   const discardResults = () => {
+    resultsVersionRef.current += 1;
     setResults([]);
     setResultNotice(null);
+    setItemStatus({});
+    setSavedIds(new Set());
+  };
+
+  const setStatus = (id, status) => setItemStatus((current) => ({ ...current, [id]: status }));
+
+  // 保存の途中で結果が捨てられたら、古い保存のチェックは新しい結果に付けない
+  const createSaveMarker = () => {
+    const version = resultsVersionRef.current;
+    return (ids) => {
+      if (version !== resultsVersionRef.current) return;
+      setSavedIds((current) => (ids.every((id) => current.has(id)) ? current : new Set([...current, ...ids])));
+    };
   };
 
   const handleFormatChange = (value) => {
@@ -174,11 +193,14 @@ const ImageConverter = () => {
 
     for (const [index, item] of targets.entries()) {
       if (abortedRef.current) return;
+      setStatus(item.id, 'converting');
       try {
         const output = await convertImage(item.file, { format, size: size.width ? size : null });
         converted.push({ id: item.id, file: withName(output, nameUnique(output.name)) });
+        setStatus(item.id, 'done');
       } catch (error) {
         failures.push(error instanceof ConversionError ? error.message : `${item.file.name}：変換に失敗しました`);
+        setStatus(item.id, 'failed');
       }
       setProgress({ done: index + 1, total: targets.length });
     }
@@ -211,22 +233,36 @@ const ImageConverter = () => {
     }
   };
 
-  const handleDownloadAll = () =>
-    runDownload(async () => {
+  const handleDownloadAll = () => {
+    const markSaved = createSaveMarker();
+    return runDownload(async () => {
       if (resultFiles.length === 1) {
         downloadFile(resultFiles[0]);
+        markSaved([results[0].id]);
       } else if (downloadMode === 'zip') {
         setBusy({ type: 'zip' });
         await downloadAsZip(resultFiles, sanitizeBaseName(zipName) ?? defaultZipBaseName());
+        markSaved(results.map((result) => result.id));
       } else {
         setBusy({ type: 'individual', done: 0, total: resultFiles.length });
         await downloadFilesOneByOne(resultFiles, {
-          onProgress: (done, total) => setBusy({ type: 'individual', done, total }),
+          // 1枚保存するたびに、その行へチェックを付ける
+          onProgress: (done, total) => {
+            setBusy({ type: 'individual', done, total });
+            markSaved([results[done - 1].id]);
+          },
         });
       }
     });
+  };
 
-  const handleDownloadOne = (file) => runDownload(async () => downloadFile(file));
+  const handleDownloadOne = (result) => {
+    const markSaved = createSaveMarker();
+    return runDownload(async () => {
+      downloadFile(result.file);
+      markSaved([result.id]);
+    });
+  };
 
   const handleShare = () => runDownload(() => shareFiles(resultFiles));
 
@@ -269,6 +305,7 @@ const ImageConverter = () => {
                   <FileRow
                     key={item.id}
                     file={item.file}
+                    status={itemStatus[item.id]}
                     action={{
                       label: `${item.file.name}を削除`,
                       icon: <X size={18} aria-hidden="true" />,
@@ -290,10 +327,13 @@ const ImageConverter = () => {
           <button
             ref={convertButtonRef}
             type="button"
-            className="button button--primary button--block"
+            className={`button button--primary button--block${isConverting ? ' is-progress' : ''}`}
+            // 押したボタン自体が、終わった枚数の割合だけ左から満ちていく
+            style={isConverting ? { '--progress': progress.done / progress.total } : undefined}
             onClick={handleConvert}
             disabled={items.length === 0 || isConverting}
           >
+            {isConverting && <span className="button__fill" aria-hidden="true" />}
             {isConverting && <LoaderCircle size={20} className="spin" aria-hidden="true" />}
             {isConverting
               ? `変換中… ${progress.done} / ${progress.total}`
@@ -302,7 +342,12 @@ const ImageConverter = () => {
                 : '画像を追加すると変換できます'}
           </button>
           {isConverting && (
-            <progress className="progress" max={progress.total} value={progress.done} aria-label="変換の進み具合" />
+            <progress
+              className="visually-hidden"
+              max={progress.total}
+              value={progress.done}
+              aria-label="変換の進み具合"
+            />
           )}
           <p className="visually-hidden" role="status">
             {isConverting ? `${progress.total}枚中${progress.done}枚を変換しました` : ''}
@@ -320,6 +365,7 @@ const ImageConverter = () => {
           onZipNameChange={setZipName}
           onDownloadAll={handleDownloadAll}
           onDownloadOne={handleDownloadOne}
+          savedIds={savedIds}
           canShare={canShare}
           onShare={handleShare}
           busy={busy}
