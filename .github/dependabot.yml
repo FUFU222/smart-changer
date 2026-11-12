@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    # 公開直後のバージョンは乗っ取り被害の報告が出る前に取り込んでしまうおそれがあるため、7日置いてから提案させる
+    cooldown:
+      default-days: 7
+    groups:
+      dependencies:
+        patterns: ['*']
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7

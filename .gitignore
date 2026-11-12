@@ -36,3 +36,13 @@ yarn.lock
 
 # Git管理の設定ファイル
 .git/
+
+# Vite
+dist/
+coverage/
+
+# Claude Code
+.claude/
+
+# gstack のローカルレポート
+.gstack/
