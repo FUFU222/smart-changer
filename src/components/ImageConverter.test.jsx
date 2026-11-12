@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import ImageConverter from './ImageConverter';
@@ -64,7 +64,9 @@ describe('ImageConverter', () => {
     await addAndConvert(ctx, [png('a.png'), png('b.png')]);
 
     await ctx.user.click(screen.getByRole('radio', { name: '1枚ずつ' }));
-    expect(screen.queryByLabelText('ZIPのファイル名')).not.toBeInTheDocument();
+    // 閉じた欄は aria-hidden + inert になり、操作や読み上げの対象から外れる
+    expect(screen.queryByRole('textbox', { name: 'ZIPのファイル名' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('ZIPのファイル名').closest('[inert]')).not.toBeNull();
 
     await ctx.user.click(screen.getByRole('button', { name: '2枚をダウンロード' }));
 
@@ -84,13 +86,85 @@ describe('ImageConverter', () => {
     expect(screen.getByRole('radio', { name: '1枚ずつ' })).toBeChecked();
   });
 
-  test('変換後の画像は1枚ずつ個別にも保存できる', async () => {
+  test('変換後の画像は1枚ずつ個別にも保存でき、保存した行はダウンロード済みになる', async () => {
     const ctx = setup();
     await addAndConvert(ctx, [png('a.png'), png('b.png')]);
 
     await ctx.user.click(screen.getByRole('button', { name: 'b.jpgをダウンロード' }));
 
     expect(downloadFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'b.jpg' }));
+    expect(screen.getByRole('button', { name: 'b.jpgをもう一度ダウンロード' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'a.jpgをダウンロード' })).toBeInTheDocument();
+  });
+
+  test('「1枚ずつ」保存では、保存が進むたびに行がダウンロード済みになる', async () => {
+    let reportProgress;
+    let finish;
+    vi.mocked(downloadFilesOneByOne).mockImplementation((files, { onProgress }) => {
+      reportProgress = onProgress;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const ctx = setup();
+    await addAndConvert(ctx, [png('a.png'), png('b.png')]);
+    await ctx.user.click(screen.getByRole('radio', { name: '1枚ずつ' }));
+    await ctx.user.click(screen.getByRole('button', { name: '2枚をダウンロード' }));
+
+    act(() => reportProgress(1, 2));
+    expect(screen.getByRole('button', { name: 'a.jpgをもう一度ダウンロード' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'b.jpgをダウンロード' })).toBeInTheDocument();
+
+    act(() => reportProgress(2, 2));
+    await act(async () => finish());
+    expect(screen.getByRole('button', { name: 'b.jpgをもう一度ダウンロード' })).toBeEnabled();
+  });
+
+  test('ZIPで保存すると、すべての行がダウンロード済みになる', async () => {
+    const ctx = setup();
+    await addAndConvert(ctx, [png('a.png'), png('b.png')]);
+
+    await ctx.user.click(screen.getByRole('button', { name: 'ZIPでダウンロード（2枚）' }));
+
+    expect(screen.getByRole('button', { name: 'a.jpgをもう一度ダウンロード' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'b.jpgをもう一度ダウンロード' })).toBeInTheDocument();
+  });
+
+  test('ZIPの作成に失敗したら、ダウンロード済みにしない', async () => {
+    vi.mocked(downloadAsZip).mockRejectedValue(new Error('boom'));
+    const ctx = setup();
+    await addAndConvert(ctx, [png('a.png'), png('b.png')]);
+
+    await ctx.user.click(screen.getByRole('button', { name: 'ZIPでダウンロード（2枚）' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存できませんでした');
+    expect(screen.getByRole('button', { name: 'a.jpgをダウンロード' })).toBeInTheDocument();
+  });
+
+  test('変換中は、処理中の画像と終わった画像が行ごとに分かる', async () => {
+    let finishFirst;
+    vi.mocked(convertImage)
+      .mockImplementationOnce(
+        (file) =>
+          new Promise((resolve) => {
+            finishFirst = () => resolve(toJpeg(file));
+          }),
+      )
+      .mockImplementation(toJpeg);
+    const ctx = setup();
+    await ctx.user.upload(ctx.input(), [png('a.png'), png('b.png')]);
+    await ctx.user.click(await screen.findByRole('button', { name: '2枚を変換する' }));
+
+    const rows = () => within(screen.getByRole('list', { name: '変換する画像' })).getAllByRole('listitem');
+    expect(rows()[0]).toHaveTextContent('（変換中）');
+    expect(rows()[1]).not.toHaveTextContent(/（変換/);
+    expect(screen.getByRole('button', { name: '変換中… 0 / 2' })).toBeDisabled();
+
+    await act(async () => finishFirst());
+
+    expect(await screen.findByRole('heading', { name: /変換が完了しました（2枚）/ })).toBeInTheDocument();
+    expect(rows()[0]).toHaveTextContent('（変換済み）');
+    expect(rows()[1]).toHaveTextContent('（変換済み）');
   });
 
   test('変換後のファイル名が重なっても上書きしない', async () => {
@@ -117,6 +191,10 @@ describe('ImageConverter', () => {
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toHaveTextContent('1枚を変換できませんでした');
     expect(alerts[0]).toHaveTextContent('bad.png：画像を読み込めませんでした');
+
+    const rows = within(screen.getByRole('list', { name: '変換する画像' })).getAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('（変換済み）');
+    expect(rows[1]).toHaveTextContent('（変換できませんでした）');
   });
 
   test('非対応の形式は理由を示して追加しない', async () => {
@@ -186,5 +264,7 @@ describe('ImageConverter', () => {
     await ctx.user.click(screen.getByRole('radio', { name: 'PNG' }));
 
     expect(screen.queryByRole('heading', { name: /変換が完了しました/ })).not.toBeInTheDocument();
+    // 行ごとの「変換済み」も古い結果と一緒に消える
+    expect(screen.getByRole('list', { name: '変換する画像' })).not.toHaveTextContent('（変換済み）');
   });
 });

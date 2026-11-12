@@ -6,11 +6,17 @@ import { useId } from 'react';
  */
 const SegmentedControl = ({ legend, legendHidden = false, name, options, value, onChange, disabled = false }) => {
   const groupId = useId();
+  const selectedIndex = options.findIndex((option) => option.value === value);
 
   return (
     <fieldset className="segmented" disabled={disabled}>
       <legend className={legendHidden ? 'visually-hidden' : 'field-label'}>{legend}</legend>
-      <div className="segmented__track">
+      <div
+        className="segmented__track"
+        style={{ '--segment-count': options.length, '--segment-index': Math.max(selectedIndex, 0) }}
+      >
+        {/* 選択中の背景は1枚だけ置き、選んだ位置まで滑らせる */}
+        {selectedIndex >= 0 && <span className="segmented__thumb" aria-hidden="true" />}
         {options.map((option) => {
           const id = `${groupId}-${option.value}`;
           return (

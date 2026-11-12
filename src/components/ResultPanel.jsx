@@ -1,4 +1,4 @@
-import { CircleCheck, Download, FileArchive, Files, LoaderCircle, RotateCcw, Share } from 'lucide-react';
+import { Check, CircleCheck, Download, FileArchive, Files, LoaderCircle, RotateCcw, Share } from 'lucide-react';
 import { defaultZipBaseName } from '../lib/fileNames';
 import FileRow from './FileRow';
 import SegmentedControl from './SegmentedControl';
@@ -7,6 +7,16 @@ const MODE_OPTIONS = [
   { value: 'zip', label: 'ZIPでまとめて', icon: <FileArchive size={18} aria-hidden="true" /> },
   { value: 'individual', label: '1枚ずつ', icon: <Files size={18} aria-hidden="true" /> },
 ];
+
+/**
+ * 保存方法の切り替えに合わせて、高さを滑らかに開け閉めする欄。
+ * 閉じている間は inert にして、キーボード操作や読み上げの対象から外す。
+ */
+const Collapse = ({ open, children }) => (
+  <div className="collapse" data-open={open} inert={!open} aria-hidden={open ? undefined : true}>
+    <div className="collapse__inner">{children}</div>
+  </div>
+);
 
 const primaryLabel = ({ count, mode, busy }) => {
   if (busy?.type === 'zip') return 'ZIPを作成中…';
@@ -24,6 +34,7 @@ const ResultPanel = ({
   onZipNameChange,
   onDownloadAll,
   onDownloadOne,
+  savedIds,
   canShare,
   onShare,
   busy,
@@ -54,33 +65,36 @@ const ResultPanel = ({
         />
       )}
 
-      {isBatch && mode === 'zip' && (
-        <div className="field">
-          <label className="field-label" htmlFor="zip-name">
-            ZIPのファイル名
-          </label>
-          <div className="input-suffix">
-            <input
-              id="zip-name"
-              type="text"
-              inputMode="text"
-              autoComplete="off"
-              spellCheck={false}
-              value={zipName}
-              placeholder={defaultZipBaseName()}
-              maxLength={50}
-              onChange={(e) => onZipNameChange(e.target.value)}
-              disabled={isBusy}
-            />
-            <span aria-hidden="true">.zip</span>
-          </div>
+      {isBatch && (
+        <div>
+          <Collapse open={mode === 'zip'}>
+            <div className="field">
+              <label className="field-label" htmlFor="zip-name">
+                ZIPのファイル名
+              </label>
+              <div className="input-suffix">
+                <input
+                  id="zip-name"
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={zipName}
+                  placeholder={defaultZipBaseName()}
+                  maxLength={50}
+                  onChange={(e) => onZipNameChange(e.target.value)}
+                  disabled={isBusy}
+                />
+                <span aria-hidden="true">.zip</span>
+              </div>
+            </div>
+          </Collapse>
+          <Collapse open={mode === 'individual'}>
+            <p className="field-hint">
+              ファイルを続けて保存します。ブラウザに複数ファイルのダウンロードを確認されたら「許可」を選んでください。
+            </p>
+          </Collapse>
         </div>
-      )}
-
-      {isBatch && mode === 'individual' && (
-        <p className="field-hint">
-          ファイルを続けて保存します。ブラウザに複数ファイルのダウンロードを確認されたら「許可」を選んでください。
-        </p>
       )}
 
       <div className="actions">
@@ -99,19 +113,28 @@ const ResultPanel = ({
       {notice}
 
       <ul className="file-list" aria-label="変換後の画像">
-        {results.map((result) => (
-          <FileRow
-            key={result.id}
-            file={result.file}
-            action={{
-              label: `${result.file.name}をダウンロード`,
-              icon: <Download size={18} aria-hidden="true" />,
-              onClick: () => onDownloadOne(result.file),
-              disabled: isBusy,
-              tone: 'primary',
-            }}
-          />
-        ))}
+        {results.map((result) => {
+          // ダウンロード済みならチェックに変える。押せばもう一度ダウンロードできる
+          const saved = savedIds.has(result.id);
+          return (
+            <FileRow
+              key={result.id}
+              file={result.file}
+              action={{
+                label: saved ? `${result.file.name}をもう一度ダウンロード` : `${result.file.name}をダウンロード`,
+                title: saved ? 'ダウンロード済み（押すともう一度ダウンロードします）' : undefined,
+                icon: saved ? (
+                  <Check key="saved" size={18} className="icon-pop" aria-hidden="true" />
+                ) : (
+                  <Download key="download" size={18} aria-hidden="true" />
+                ),
+                onClick: () => onDownloadOne(result),
+                disabled: isBusy,
+                tone: saved ? 'success' : 'primary',
+              }}
+            />
+          );
+        })}
       </ul>
 
       <button type="button" className="button button--ghost" onClick={onReset} disabled={isBusy}>

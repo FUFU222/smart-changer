@@ -19,6 +19,9 @@
   --shadow-card: 0 18px 40px rgba(15, 36, 92, 0.08);
   --focus-ring: 0 0 0 3px rgba(30, 58, 138, 0.35);
 
+  /* 動きの速さの変化は、この曲線に揃える（素早く動き出して、ゆっくり止まる） */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
   --font-sans: system-ui, -apple-system, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI',
     'Noto Sans JP', Meiryo, sans-serif;
   --font-serif: 'Zen Old Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
@@ -253,6 +256,7 @@ a:hover {
 }
 
 .segmented__track {
+  position: relative;
   display: grid;
   grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
@@ -300,10 +304,35 @@ a:hover {
   background: var(--c-primary-soft);
 }
 
-.segmented__item input:checked + label {
+/* 選択中の紺色の背景。--segment-index の位置まで横に滑る */
+.segmented__thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px - (var(--segment-count) - 1) * 4px) / var(--segment-count));
+  border-radius: var(--radius-sm);
   background: var(--c-primary);
-  color: #fff;
   box-shadow: 0 1px 2px rgba(15, 36, 92, 0.2);
+  pointer-events: none;
+  transform: translateX(calc(var(--segment-index) * (100% + 4px)));
+  transition:
+    transform 260ms var(--ease-out),
+    scale 160ms var(--ease-out);
+}
+
+/* 選択中の項目を押している間だけ、つまみが少し縮む */
+.segmented__track:has(input:checked + label:active) .segmented__thumb {
+  scale: 0.97;
+}
+
+.segmented:disabled .segmented__thumb {
+  opacity: 0.5;
+}
+
+.segmented__item input:checked + label {
+  background: none;
+  color: #fff;
 }
 
 .segmented__item input:focus-visible + label {
@@ -415,6 +444,47 @@ a:hover {
   color: var(--c-muted);
 }
 
+/* サムネイルと、その上に重ねる変換状態の印 */
+.file-row__thumb {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 48px;
+}
+
+.file-row__overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: rgba(15, 36, 92, 0.55);
+  color: #fff;
+  animation: fade-in 150ms ease-out;
+}
+
+.file-row__badge {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--c-surface);
+  border-radius: 50%;
+  color: #fff;
+  animation: pop-in 240ms var(--ease-out);
+}
+
+.file-row__badge--done {
+  background: var(--c-success);
+}
+
+.file-row__badge--failed {
+  background: var(--c-danger);
+}
+
 .file-row__meta {
   display: grid;
   min-width: 0;
@@ -477,6 +547,28 @@ a:hover {
   background: #9aa6bf;
 }
 
+/* 変換中のボタン。押せないが灰色にはせず、進み具合で満ちていく様子を見せる */
+.button.is-progress {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  cursor: progress;
+}
+
+.button--primary.is-progress:disabled {
+  background: var(--c-primary);
+}
+
+.button__fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: rgba(255, 255, 255, 0.22);
+  transform: scaleX(var(--progress, 0));
+  transform-origin: left;
+  transition: transform 320ms var(--ease-out);
+}
+
 .button--secondary {
   border-color: var(--c-primary);
   background: var(--c-surface);
@@ -528,6 +620,11 @@ a:hover {
   color: var(--c-primary);
 }
 
+.icon-button--success,
+.icon-button--success:hover:not(:disabled) {
+  color: var(--c-success);
+}
+
 .icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -572,32 +669,7 @@ a:hover {
   gap: 10px;
 }
 
-/* 進み具合 */
-
-.progress {
-  width: 100%;
-  height: 6px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 999px;
-  background: var(--c-primary-soft);
-  appearance: none;
-}
-
-.progress::-webkit-progress-bar {
-  background: var(--c-primary-soft);
-}
-
-.progress::-webkit-progress-value {
-  border-radius: 999px;
-  background: var(--c-primary);
-  transition: width 0.2s ease;
-}
-
-.progress::-moz-progress-bar {
-  border-radius: 999px;
-  background: var(--c-primary);
-}
+/* 動き */
 
 .spin {
   animation: spin 0.9s linear infinite;
@@ -606,6 +678,24 @@ a:hover {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* 小さな印やアイコンが、少し小さい状態からふっと現れる */
+.icon-pop {
+  animation: pop-in 260ms var(--ease-out);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
   }
 }
 
@@ -672,6 +762,28 @@ a:hover {
 
 .result__heading:focus {
   outline: none;
+}
+
+/* 高さを開け閉めする欄。grid の行の高さを 0fr ⇔ 1fr で切り替える */
+.collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 260ms var(--ease-out),
+    opacity 200ms ease;
+}
+
+.collapse[data-open='false'] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+/* 入力欄のフォーカス枠（外側3px）が切れないよう、はみ出し分の余白を内側に持たせる */
+.collapse__inner {
+  min-height: 0;
+  margin: -4px;
+  padding: 4px;
+  overflow: hidden;
 }
 
 @keyframes rise {
